@@ -1,0 +1,67 @@
+# _sources.yml — declaração das fontes (tabelas que o dbt LÊ, mas não cria).
+#
+# Por que este arquivo existe:
+#   As 3 tabelas abaixo foram carregadas pelo src/seed.py (fora do dbt).
+#   Declará-las como "source" permite referenciá-las com
+#   {{ source('raw', '<tabela>') }} nos modelos, o que:
+#     - desacopla o nome físico (raw.raw_ga4_events) do uso nos modelos;
+#     - habilita linhagem automática no DAG do dbt;
+#     - permite testar a FONTE (ex.: event_id único) e checar freshness.
+#
+# A convenção de nome "_sources.yml" (com underscore na frente) é só para o
+# arquivo aparecer no topo da pasta. O dbt lê qualquer .yml em model-paths.
+
+version: 2
+
+sources:
+  # 'name' é o PRIMEIRO argumento de source(). Aqui ele coincide com o schema
+  # físico ('raw'), mas não precisaria: 'schema' abaixo é quem aponta para o
+  # schema real no Postgres. Mantê-los iguais evita confusão.
+  - name: raw
+    description: "Camada bronze — CSVs carregados as-is pelo src/seed.py, sem limpeza."
+    database: mkt_ads      # nome do banco no Postgres
+    schema: raw            # schema físico onde as tabelas vivem
+
+    tables:
+      # ---------------------------------------------------------------
+      # Metadados do experimento A/B (2 linhas: variante A e B).
+      # É a dimensão que dá "significado de negócio" às campanhas.
+      # ---------------------------------------------------------------
+      - name: raw_ab_test_metadata
+        description: "1 linha por variante do teste A/B (controle A, tratamento B)."
+        columns:
+          - name: variant_id
+            description: "Chave da variante (A/B)."
+            data_tests:
+              - unique        # não pode haver duas linhas para a mesma variante
+              - not_null
+
+      # ---------------------------------------------------------------
+      # Relatório diário do Google Ads (720 linhas). Grão:
+      # dia × campanha × ad_group × ad × device.
+      # ATENÇÃO: cost_micros está em MICROS (÷1e6 só no staging!).
+      # ---------------------------------------------------------------
+      - name: raw_google_ads_ad_report
+        description: "Gasto/performance diária de mídia. cost_micros em micros (÷1e6 no staging)."
+        columns:
+          - name: campaign_id
+            description: "FK para raw_ab_test_metadata.campaign_id."
+            data_tests:
+              - not_null
+
+      # ---------------------------------------------------------------
+      # Eventos do GA4 (97.278 linhas). Grão: 1 por evento disparado.
+      # Contém sujeira proposital: duplicatas por event_id, bots/QA, UTMs
+      # despadronizadas. Tudo isso é tratado no staging, não aqui.
+      # ---------------------------------------------------------------
+      - name: raw_ga4_events
+        description: "Eventos web crus do GA4. Deduplicar/filtrar no staging (ver guia, seção 5)."
+        columns:
+          - name: event_id
+            description: "ID do evento. NÃO é único no raw (845 duplicatas de propósito)."
+            # Repare: aqui NÃO colocamos o teste 'unique'. Se colocássemos, a
+            # fonte falharia por causa das 845 duplicatas que QUEREMOS estudar.
+            # A unicidade de event_id é um invariante do STAGING (pós-dedup),
+            # não da fonte. Testar a regra certa na camada certa é o ponto.
+            data_tests:
+              - not_null
