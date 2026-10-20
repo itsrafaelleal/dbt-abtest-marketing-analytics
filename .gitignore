@@ -24,3 +24,5 @@ data/
 target/
 dbt_packages/
 logs/
+#guias contexto
+GUIA-PROJETO.md
