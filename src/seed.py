@@ -11,7 +11,8 @@ from sqlalchemy import create_engine, text
 # ---------------------------------------------------------------------------
 # BASE_DIR = pasta onde este arquivo (seed.py) está.
 # resolve() transforma em caminho absoluto; parent pega o diretório.
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
+
 
 # Carrega as variáveis do .env para dentro de os.environ
 load_dotenv(BASE_DIR / ".env")

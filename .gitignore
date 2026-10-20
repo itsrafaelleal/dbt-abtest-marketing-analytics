@@ -16,3 +16,13 @@ __pycache__/
 data/
 *.csv
 *.parquet
+
+# dbt — artefatos de execução (gerados, não versionar)
+# target/        -> SQL compilado e resultados da ultima rodada
+# dbt_packages/  -> dependencias baixadas (reinstalaveis com `dbt deps`)
+# logs/          -> logs de execucao do dbt
+target/
+dbt_packages/
+logs/
+#guias contexto
+GUIA-PROJETO.md
