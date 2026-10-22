@@ -62,6 +62,15 @@ clean as (
 
         -- Custo: micros -> reais. O .0 força divisão decimal. numeric(12,2) = reais , centavos.
         (cost_micros / 1000000.0)::numeric(12,2) as custo_brl,
+        -- SUGESTÃO (padrão da casa): padronizar o tipo de dinheiro com a macro
+        -- to_money, que castea para numeric(18,2) em todo o projeto. A divisão
+        -- por 1e6 continua aqui (regra do micros); a macro só faz o cast final.
+        -- Para aplicar, troque a linha do custo acima por uma chamada da macro:
+        --   to_money('cost_micros / 1000000.0')  seguida de  as custo_brl
+        --   (envolvendo a chamada em chaves duplas de Jinja).
+        -- Obs.: evitei escrever as chaves duplas de Jinja aqui de propósito —
+        -- dentro de um comentário '--' o dbt ainda expande o Jinja antes do
+        -- SQL, e a macro vazaria gerando um segundo 'custo_brl'.
 
         -- Audit column do silver: carimbo de quando esta linha foi processada.
         current_timestamp as data_processamento
