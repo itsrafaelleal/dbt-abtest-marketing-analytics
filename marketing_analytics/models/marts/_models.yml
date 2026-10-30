@@ -1,0 +1,66 @@
+# _models.yml — declaração e testes dos modelos da camada marts (gold).
+#
+# Por que testar aqui (e não só confiar no SQL):
+#   dim_variant NÃO usa DISTINCT de propósito. A garantia de que o grão é
+#   "1 linha por variante" não vem de forçar unicidade no SQL, e sim de PROVAR
+#   esse invariante com testes. Se um dia a origem duplicar, o teste 'unique'
+#   fica VERMELHO e denuncia o problema — em vez de um DISTINCT escondê-lo.
+
+version: 2
+
+models:
+  - name: dim_variant
+    description: >
+      Dimensão de variante do teste A/B (star schema). Grão: 1 linha por
+      variante (A = controle, B = tratamento). Origem: stg_ab_test_metadata.
+    columns:
+      - name: variant_id
+        description: "PK da dimensão. 'A' (controle) ou 'B' (tratamento)."
+        data_tests:
+          - unique        # prova o grão: não pode haver 2 linhas da mesma variante
+          - not_null      # a chave primária nunca pode ser nula
+
+      - name: is_control
+        description: "Flag de grupo de controle (true = A, false = B)."
+        data_tests:
+          - not_null
+
+      - name: campaign_id
+        description: "FK para a campanha do Google Ads vinculada à variante."
+        data_tests:
+          - not_null
+
+  - name: fct_ad_gasto_diario
+    description: >
+      Fato de mídia (Google Ads). Grão: dia × campanha × device. Desde a 7.2
+      traz variant_id (ponte campaign_id -> variante via dim_variant), para o BI
+      cruzar mídia com funil por variante sem blend. O join é 1:1 (1 campanha por
+      variante hoje); a não-multiplicação é provada em
+      tests/assert_ad_gasto_diario_sem_fanout.sql.
+    columns:
+      - name: variant_id
+        description: "Variante A/B derivada da campaign_id via dim_variant."
+      - name: qtd_custo_brl
+        description: "Custo diário em reais (cost_micros já ÷ 1e6 no staging)."
+
+  - name: fct_performance_diaria
+    description: >
+      Fato diário agregado (funil + mídia) no grão dia × variante × device, SEM a
+      dimensão de etapa. Criado na 7.3 para (1) eliminar o blend do Looker e (2)
+      corrigir a não-aditividade do funil — aqui sessoes/compras/receita podem ser
+      somadas com segurança. Ratios (CTR, CPC, CPA, ROAS, CR) NÃO são
+      pré-calculados: ficam como SUM(num)/SUM(den) no BI. A unicidade do grão é
+      provada em tests/assert_performance_diaria_grao_unico.sql.
+    columns:
+      - name: variant_id
+        description: "Variante A/B. PK composta com date_day e device."
+        data_tests:
+          - not_null
+      - name: date_day
+        description: "Dia do evento/gasto. PK composta."
+        data_tests:
+          - not_null
+      - name: device
+        description: "Categoria de device. PK composta."
+        data_tests:
+          - not_null

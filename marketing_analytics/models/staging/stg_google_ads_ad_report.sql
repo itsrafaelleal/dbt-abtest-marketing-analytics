@@ -22,7 +22,7 @@ with source as (
 clean as (
 
     select
-        -- Surrogate key: hash da chave natural do grão (catálogo):
+        -- Surrogate key: chave sintetica usando hash da chave concatenando campos
         -- date_day + campaign_id + ad_group_id + ad_id + device.
         md5(
             date_day
@@ -60,19 +60,10 @@ clean as (
         impressions as impressoes,
         clicks      as cliques,
 
-        -- Custo: micros -> reais. O .0 força divisão decimal. numeric(12,2) = reais , centavos.
-        (cost_micros / 1000000.0)::numeric(12,2) as custo_brl,
-        -- SUGESTÃO (padrão da casa): padronizar o tipo de dinheiro com a macro
-        -- to_money, que castea para numeric(18,2) em todo o projeto. A divisão
-        -- por 1e6 continua aqui (regra do micros); a macro só faz o cast final.
-        -- Para aplicar, troque a linha do custo acima por uma chamada da macro:
-        --   to_money('cost_micros / 1000000.0')  seguida de  as custo_brl
-        --   (envolvendo a chamada em chaves duplas de Jinja).
-        -- Obs.: evitei escrever as chaves duplas de Jinja aqui de propósito —
-        -- dentro de um comentário '--' o dbt ainda expande o Jinja antes do
-        -- SQL, e a macro vazaria gerando um segundo 'custo_brl'.
+        -- via macro to_money.a divisão é a regra do micros; a macro só padroniza o tipo de dinheiro
+        {{ to_money('cost_micros / 1000000.0') }}  as custo_brl,
 
-        -- Audit column do silver: carimbo de quando esta linha foi processada.
+        -- data de processamento = carimbo de quando esta linha foi processada.
         current_timestamp as data_processamento
 
     from source

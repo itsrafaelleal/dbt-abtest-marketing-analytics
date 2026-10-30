@@ -35,6 +35,10 @@ sources:
             data_tests:
               - unique        # não pode haver duas linhas para a mesma variante
               - not_null
+          - name: _loaded_at
+            description: "Auditoria: timestamp UTC da carga no raw (src/seed.py)."
+          - name: _source_file
+            description: "Auditoria: nome do arquivo de origem."
 
       # ---------------------------------------------------------------
       # Relatório diário do Google Ads (720 linhas). Grão:
@@ -48,6 +52,10 @@ sources:
             description: "FK para raw_ab_test_metadata.campaign_id."
             data_tests:
               - not_null
+          - name: _loaded_at
+            description: "Auditoria: timestamp UTC da carga no raw (src/seed.py)."
+          - name: _source_file
+            description: "Auditoria: nome do arquivo de origem."
 
       # ---------------------------------------------------------------
       # Eventos do GA4 (97.278 linhas). Grão: 1 por evento disparado.
@@ -65,3 +73,7 @@ sources:
             # não da fonte. Testar a regra certa na camada certa é o ponto.
             data_tests:
               - not_null
+          - name: _loaded_at
+            description: "Auditoria: timestamp UTC da carga no raw (src/seed.py)."
+          - name: _source_file
+            description: "Auditoria: nome do arquivo de origem."

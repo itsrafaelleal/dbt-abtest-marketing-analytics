@@ -409,3 +409,284 @@ nulo na coluna".
 > **Regra de bolso:** tipo em arquivo de texto (CSV/JSON) é sempre inferido, nunca
 > declarado. Se o tipo importa (dinheiro, id, data), não confie no palpite do
 > leitor — declare explicitamente (`dtype=` na ingestão, ou `cast()` no staging).
+
+---
+
+## 10. Gerar a `dim_date` com `generate_series`
+
+Ao construir a `dim_date` (a dimensão de calendário do star schema) esbarrei numa
+pergunta prática: como gerar uma linha por dia de 01/09 a 30/09 **sem** digitar 30
+datas na mão nem depender de uma tabela estática? Havia dois caminhos — a macro
+`dbt_utils.date_spine` (pacote externo) ou SQL nativo com `generate_series`.
+Escolhi o `generate_series`, e o raciocínio dessa escolha é o aprendizado.
+
+### A solução que usei: `generate_series` (nativo do Postgres)
+
+A intuição é a mais simples possível: *pega a primeira data e vai somando +1 dia
+até fechar a janela*. Esse algoritmo tem um nome pronto no Postgres —
+`generate_series(início, fim, passo)` — que devolve uma linha por período:
+
+```sql
+with calendario as (
+    select
+        generate_series(
+            '2026-09-01'::date,   -- primeira data (início da janela)
+            '2026-09-30'::date,   -- última data (fim da janela, INCLUSIVO)
+            '1 day'::interval     -- o passo: "+1 dia" por linha
+        )::date as date_day
+)
+select
+    date_day,
+    extract(year  from date_day)::int      as ano,
+    extract(month from date_day)::int      as mes,
+    extract(day   from date_day)::int      as dia,
+    extract(dow   from date_day) in (0,6)  as is_weekend  -- dow: 0=dom .. 6=sáb
+from calendario
+```
+
+Três argumentos: de onde parte, onde para, de quanto em quanto. O banco cospe os
+30 dias. As colunas derivadas (`ano`, `mes`, `dia`, `is_weekend`) são `extract()`
+puro em cima da série.
+
+### Por que `generate_series` e não `dbt_utils.date_spine`
+
+A macro `date_spine` faz a mesma coisa de forma portável entre bancos (ela
+compila para o SQL nativo de cada adapter). Preferi o `generate_series` porque:
+
+- **Zero dependência externa.** Não preciso instalar nem versionar o pacote
+  `dbt_utils` só para gerar 30 datas num projeto que é 100% Postgres.
+- **Legibilidade para quem lê o modelo.** `generate_series(início, fim, passo)`
+  diz exatamente o que faz; a macro esconde isso atrás de uma camada de Jinja.
+- **O trade-off assumido:** se um dia o warehouse mudasse (ex.: para BigQuery ou
+  Snowflake), o `generate_series` precisaria ser reescrito, enquanto a macro
+  seguiria funcionando. Para um projeto fixo em Postgres, portabilidade que eu
+  não vou usar é complexidade sem retorno.
+
+> **Regra de bolso:** usar o nativo quando o projeto é mono-banco e a query é
+> simples; usar a macro quando há múltiplos adapters ou a lógica é complexa o
+> bastante para valer a abstração.
+
+---
+
+## 11. Conectar o BI ao banco: o problema de dar ao Looker um `host:porta` alcançável
+
+Com os marts prontos no Postgres do homelab (`localhost:5499`), faltava o último
+elo: expor a camada `marts` para o **Looker Studio**, que é um serviço na nuvem
+do Google. Aqui o aprendizado não é de SQL, é de **arquitetura de rede e
+segurança** — e foi tão trabalhoso quanto qualquer transformação.
+
+O problema = o Looker Studio roda nos servidores do Google e só sabe
+abrir uma **conexão TCP direta** a um `host:porta` alcançável pela internet. O
+meu banco está em `localhost` — invisível para fora. Então ou eu trago o Looker
+até o banco (túnel/exposição), ou levo o banco para a nuvem (hospedar).
+
+Avaliei três famílias e o porquê de cada escolha:
+
+| Opção | Veredito | Motivo |
+| :--- | :--- | :--- |
+| **Port forward no roteador** | ❌ descartada | Abre a porta 5499.exemple para a internet inteira; bots varrem 5432/5430 o tempo todo. Superfície de ataque alta demais para o ganho. |
+| **Túnel Cloudflare** (já uso para SSH) | ❌ não serve ao Looker | Detalhado no aprendizado 12. |
+| **`ngrok tcp`** | ✅ para provar | Dá um `host:porta` TCP público direto — exatamente o que o conector do Looker espera. Rápido e descartável. |
+| **Postgres gerenciado** (Neon/Supabase) | ✅ para o permanente | Endereço estável, TLS nativo, independe do homelab ligado. Melhor narrativa de produção. |
+
+ngrok é uma ferramenta de túnel reverso: ele pega um serviço que roda na sua máquina (em localhost) e dá a ele um endereço público
+alcançável pela internet, sem você precisar abrir portas no roteador nem ter IP fixo.
+
+Como funciona: o agente do ngrok abre uma conexão de dentro pra fora até os servidores dele, e tudo que chega naquele
+endereço público é encaminhado de volta pro seu localhost.
+
+Finalidade: expor rápido e de forma temporária algo local pro mundo — pra testar, demonstrar ou integrar com um serviço externo que precisa
+te alcançar.
+
+
+A decisão prática: **`ngrok` para validar o dashboard agora**, e **migrar o
+`marts` para um Postgres gerenciado** quando quiser o portfólio "sempre no ar".
+
+---
+
+## 12. Por que o túnel Cloudflare (que já uso para SSH) não serve ao Looker
+
+Eu já acesso o homelab por SSH sobre um **túnel Cloudflare** (`cloudflared`),
+via um hostname próprio. A tentação natural foi reusar o mesmo túnel para o
+Postgres. Não funciona — e entender o porquê ensina como o túnel realmente opera.
+
+O túnel Cloudflare **transporta TCP sim** (SSH é TCP, e funciona). O problema é o
+**outro lado da conexão**: para alcançar um serviço TCP arbitrário pelo túnel, o
+cliente precisa rodar o binário `cloudflared access` localmente, que abre um
+`localhost:porta` autenticado na máquina do cliente. No meu SSH isso funciona
+porque a ponta é a **minha máquina**, onde eu instalo o que quiser (um
+`ProxyCommand` no `~/.ssh/config`).
+
+Mas o **Looker Studio é um serviço gerenciado do Google**: não tenho shell nele,
+não instalo `cloudflared`, não rodo cliente nenhum. Sem o cliente na ponta, a
+rota TCP do Cloudflare não é alcançável pelo Looker.
+
+> **A lição:** "o túnel transporta TCP" não basta — é preciso perguntar **quem
+> roda o cliente do túnel na outra ponta**. Para ferramenta gerenciada (SaaS)
+> que não me dá esse controle, o túnel Cloudflare serve de **acesso de operador**
+> (eu → homelab), não de **caminho de dados** (SaaS → banco).
+
+---
+
+## 13. Nunca exponha o dono do banco: role somente-leitura restrito ao schema de consumo
+
+Assim que decidi expor o banco (mesmo que temporariamente, via `ngrok`), a
+primeira regra foi: **o BI nunca conecta com o usuário dono do banco** (`dono`).
+Expor o dono num endereço público daria a quem o descobrisse poder de **ler tudo
+e escrever/apagar**. Criei um role dedicado, somente leitura, restrito ao schema
+`marts` (o `sql/grant_looker_ro.sql`):
+
+```sql
+CREATE ROLE looker_ro LOGIN PASSWORD 'senha-forte';
+GRANT CONNECT ON DATABASE mkt_ads TO looker_ro;
+GRANT USAGE ON SCHEMA marts TO looker_ro;
+GRANT SELECT ON ALL TABLES IN SCHEMA marts TO looker_ro;
+ALTER DEFAULT PRIVILEGES IN SCHEMA marts GRANT SELECT TO looker_ro;
+```
+
+O raciocínio de cada peça:
+
+- **Separação de privilégio (princípio do menor privilégio).** O role só faz
+  `SELECT`, só no `marts`. Nunca vê `raw`/`staging`, nunca escreve. O pior caso
+  caso o endereço vaze é alguém **ler** as tabelas de consumo — não há escrita,
+  não há exposição das camadas cruas.
+- **`GRANT SELECT ON ALL TABLES`** cobre as tabelas que existem **hoje**.
+- **`ALTER DEFAULT PRIVILEGES`** é a peça sutil: sem ela, toda vez que o `dbt
+  build` recriasse as tabelas do `marts`, o `looker_ro` **perderia o acesso**
+  (tabela nova = sem grant). O default privileges aplica a regra a objetos
+  **futuros** criados pelo mesmo dono — some com o problema de "o dashboard
+  quebrou depois que rodei o dbt".
+
+> **A lição:** permissão em warehouse não é só "quem pode ler" — é "quem pode ler
+> **o quê** e **até quando**". Em pipeline com rebuild (dbt), o default
+> privileges é o que mantém o acesso vivo entre recriações.
+
+---
+
+## 14. Por que o Looker dizia "não há tabelas" — schema de busca e Custom Query
+
+Conexão feita, credencial certa, e mesmo assim o Looker mostrava **"Não há
+tabelas disponíveis nesse banco de dados."** Não era erro de permissão nem de
+rede: o conector PostgreSQL do Looker lista, por padrão, as tabelas do schema
+**`public`** — e no meu banco o `public` está **vazio** (tudo vive em `marts`,
+`raw`, `staging`).
+
+A saída foi usar a opção **Custom Query** (consulta personalizada) e **qualificar
+o schema** explicitamente:
+
+```sql
+SELECT * FROM marts.fct_ab_test_results
+```
+
+Isso destravou um aprendizado de modelagem sobre **como montar as fontes do BI**.
+Cada fato do `marts` tem um **grão** diferente:
+
+- `fct_performance_diaria` → `(dia, variante, device)`
+- `fct_funil` → `(dia, variante, device, etapa_funil)`
+- `fct_ad_gasto_diario` → `(dia, campanha, variante, device)`
+- `fct_ab_test_results` → `(variante)`
+
+Por isso modelei **uma fonte de dados por tema** (uma query por fato + suas
+dimensões). As queries ficaram documentadas em `sql/looker_queries.sql`.
+
+> **A lição:** o "schema de busca" padrão de um conector de BI (vazio ≠ sem dados). 
+
+---
+
+## 15. SSL no conector: por que deixei desligado (e quando ligar)
+
+Ao marcar "Enable SSL" no conector, o Looker pediu três arquivos — **server
+certificate**, **client certificate** e **client private key**. Eu não tinha
+nenhum: meu Postgres local não foi configurado com SSL. Deixei **desligado**, e
+a conexão funcionou. O ponto é entender por que isso é aceitável **neste
+cenário** e quando deixaria de ser.
+
+- **O transporte já é criptografado pelo `ngrok`.** O trecho que viaja pela
+  internet pública (Looker → ngrok) vai dentro do TLS do próprio túnel. O último
+  pedaço (ngrok → Postgres) é `localhost`, dentro da própria máquina — não passa
+  pela rede. Não há trecho "em texto puro" exposto na internet.
+- **O que o SSL do Postgres acrescentaria** é proteção contra confiar no próprio
+  ngrok (que descriptografa por um instante para reencaminhar). Para um ambiente
+  **temporário, de prova, com dados fictícios**, esse risco é irrelevante — não
+  justifica configurar certificado no Postgres local.
+- **Quando passa a ser obrigatório:** na versão permanente em Postgres gerenciado
+  (Neon/Supabase), o **TLS é nativo e já configurado** — ali eu ligo SSL sem
+  precisar gerar nem subir certificado nenhum.
+
+> **A lição:** "SSL ligado" não é bom ou ruim em abstrato — depende de **onde o
+> dado trafega e quem já cuida da criptografia naquele trecho**. Com o túnel
+> cuidando do transporte público, o TLS do banco seria uma segunda camada
+> redundante; num banco exposto direto, seria indispensável.
+
+
+---
+
+## 16. Por que usar o Z-Test de proporções — e por que ele é o que dá sentido ao A/B
+
+A `fct_ab_test_results` poderia parar em "quem converteu mais": basta um
+`GROUP BY variant_id` com `conversoes / sessoes`. O problema é que essa resposta
+é **perigosamente incompleta** — e o Z-Test é exatamente o que deixa o resultado mais confiavel.
+
+### O problema que o teste resolve
+
+Suponha o resultado do experimento:
+
+| Variante | Sessões | Conversões | Taxa (CR) |
+| :--- | :---: | :---: | :---: |
+| A (controle) | 500 | 50 | 10% |
+| B (tratamento) | 500 | 60 | 12% |
+
+A leitura ingênua é "B converteu 12% contra 10%, logo B venceu". **Não
+necessariamente.** Essa diferença pode ser um efeito real da variante B **ou**
+pode ser só o **acaso** de quais visitantes caíram em cada grupo naquele mês. Se
+eu repetisse o teste, talvez A ganhasse. Decidir trocar a campanha com base numa
+diferença que era ruído é o erro clássico — e caro — de quem lê A/B test só pela
+métrica bruta.
+
+### O que o Z-Test de proporções faz
+
+Ele compara **duas proporções** (taxa de conversão = conversões ÷ sessões, onde
+cada visitante é um "comprou / não comprou") e responde a pergunta certa:
+
+> "Se A e B tivessem na verdade a **mesma** taxa de conversão (hipótese nula H₀),
+> qual seria a chance de o acaso sozinho produzir uma diferença tão grande quanto
+> a que eu observei?"
+
+Dessa conta saem as duas colunas da tabela:
+
+- **`z_stat`** — a distância da diferença observada até o "zero diferença",
+  medida em desvios-padrão. Perto de 0 = taxas praticamente coladas; grande (em
+  módulo, acima de ~1,96) = diferença expressiva em relação ao ruído esperado. O
+  sinal indica a direção.
+- **`p_valor`** — a tradução do `z_stat` em probabilidade: a chance de a diferença
+  observada ser **puro acaso**. `p_valor = 0,03` → só 3% de chance de ser sorte
+  (diferença provavelmente real); `p_valor = 0,40` → 40% de chance de ser ruído
+  (não dá para confiar).
+
+### A régua de decisão: significância
+
+O corte de mercado é o nível de **5% (α = 0,05)**:
+
+- **`p_valor < 0,05`** → diferença **estatisticamente significativa**: rejeito H₀
+  e declaro uma vencedora.
+- **`p_valor ≥ 0,05`** → **inconclusivo**: não há evidência de que B seja melhor;
+  a diferença cabe dentro do acaso (em geral, sinal de que faltou amostra).
+
+### Por que "de proporções" (e não outro teste)
+
+A escolha do teste depende da **natureza da métrica**. Conversão é uma proporção
+de eventos binários (comprou/não), então o teste certo é o **Z-Test de
+proporções**. Se eu fosse comparar *ticket médio* em reais (variável contínua),
+usaria um **t-test** — teste errado para a métrica dá conclusão errada.
+
+### Por que isso importa no projeto
+
+Sem o Z-Test, a evidencia não seria tão robusta. Com ele, a
+`fct_ab_test_results` entrega não só "quem converteu mais", mas **"quem converteu
+mais *e isso é confiável*"** — que é a única resposta que sustenta uma decisão de
+negócio.
+
+> **A ressalva honesta:** o p-valor diz se a diferença é **real**, não se ela é
+> **grande o bastante para valer a pena**. Essa segunda pergunta (tamanho do
+> efeito e retorno financeiro) se lê junto com CPA e ROAS. **Significância
+> estatística ≠ relevância prática

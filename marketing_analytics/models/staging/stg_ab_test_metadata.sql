@@ -18,7 +18,10 @@ with source as (
   
           start_date::date    as start_date,     -- text -> date 
           end_date::date      as end_date,       -- text -> date
-          is_control
+          is_control,
+
+          _loaded_at,
+          _source_file
       from source
   )
   
