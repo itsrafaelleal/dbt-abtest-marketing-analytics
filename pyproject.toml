@@ -13,13 +13,10 @@ dependencies = [
     "ipykernel>=7.4.0",
     "pandas>=3.0.6",
     "psycopg[binary]>=3.3.6",
+    "pyarrow",
     "python-dotenv>=1.2.4",
     "sqlalchemy>=2.1.5",
 ]
 
-[project.scripts]
-dbt-abtest-marketing-analytics = "dbt_abtest_marketing_analytics:main"
-
-[build-system]
-requires = ["uv_build>=0.12.2,<0.13.0"]
-build-backend = "uv_build"
+[tool.uv]
+package = false

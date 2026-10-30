@@ -22,7 +22,7 @@ with source as (
 clean as (
 
     select
-        -- Surrogate key: hash da chave natural do grão (catálogo):
+        -- Surrogate key: chave sintetica usando hash da chave concatenando campos
         -- date_day + campaign_id + ad_group_id + ad_id + device.
         md5(
             date_day
@@ -60,10 +60,10 @@ clean as (
         impressions as impressoes,
         clicks      as cliques,
 
-        -- Custo: micros -> reais. O .0 força divisão decimal. numeric(12,2) = reais , centavos.
-        (cost_micros / 1000000.0)::numeric(12,2) as custo_brl,
+        -- via macro to_money.a divisão é a regra do micros; a macro só padroniza o tipo de dinheiro
+        {{ to_money('cost_micros / 1000000.0') }}  as custo_brl,
 
-        -- Audit column do silver: carimbo de quando esta linha foi processada.
+        -- data de processamento = carimbo de quando esta linha foi processada.
         current_timestamp as data_processamento
 
     from source

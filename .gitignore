@@ -26,3 +26,7 @@ dbt_packages/
 logs/
 #guias contexto
 GUIA-PROJETO.md
+camada-gold.md
+seed.py
+catalogo-bi-looker.md
+conexao-looker-opcoes.md
