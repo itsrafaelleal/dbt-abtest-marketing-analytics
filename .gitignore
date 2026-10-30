@@ -24,9 +24,8 @@ data/
 target/
 dbt_packages/
 logs/
-#guias contexto
+#guias privado
 GUIA-PROJETO.md
 camada-gold.md
-seed.py
 catalogo-bi-looker.md
 conexao-looker-opcoes.md
