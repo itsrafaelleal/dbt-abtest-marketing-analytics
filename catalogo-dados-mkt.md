@@ -362,6 +362,88 @@ flowchart LR
     FCT_FUNIL -->|variant_id| FCT_RESULTS
 ```
 
+### Diagrama de Relacionamento do Modelo Dimensional (Camada Gold — Schema `marts`)
+
+```mermaid
+erDiagram
+    DIM_VARIANT ||--o{ FCT_PERFORMANCE_DIARIA : "variant_id"
+    DIM_DATE ||--o{ FCT_PERFORMANCE_DIARIA : "date_day"
+    DIM_VARIANT ||--o{ FCT_FUNIL : "variant_id"
+    DIM_DATE ||--o{ FCT_FUNIL : "date_day"
+    DIM_VARIANT ||--o{ FCT_AD_GASTO_DIARIO : "variant_id / campaign_id"
+    DIM_DATE ||--o{ FCT_AD_GASTO_DIARIO : "date_day"
+    DIM_VARIANT ||--|| FCT_AB_TEST_RESULTS : "variant_id"
+
+    DIM_VARIANT {
+        text variant_id PK "'A' ou 'B'"
+        text variant_label
+        boolean is_control
+        text hypothesis
+        text campaign_id FK
+        text campaign_name
+        text utm_content_prefix
+        date start_date
+        date end_date
+    }
+
+    DIM_DATE {
+        date date_day PK "2026-09-01 a 2026-09-30"
+        int ano
+        int mes
+        int dia
+        text dia_semana
+        boolean is_weekend
+    }
+
+    FCT_PERFORMANCE_DIARIA {
+        date date_day PK,FK
+        text variant_id PK,FK
+        text device PK "mobile, desktop, tablet"
+        bigint sessoes
+        bigint qtd_compras
+        numeric receita_brl
+        numeric qtd_custo_brl
+        numeric qtd_cliques
+        numeric qtd_impressoes
+    }
+
+    FCT_FUNIL {
+        date date_day PK,FK
+        text variant_id PK,FK "A, B ou NULL (organico/direto)"
+        text device PK
+        text etapa_funil PK "page_view..purchase"
+        bigint qtd_eventos
+        bigint usuarios_unicos "Nao-aditivo entre etapas"
+        bigint sessoes "Nao-aditivo entre etapas"
+        bigint qtd_compras
+        numeric receita_brl
+    }
+
+    FCT_AD_GASTO_DIARIO {
+        date date_day PK,FK
+        text campaign_id PK
+        text variant_id FK
+        text device PK
+        numeric qtd_impressoes
+        numeric qtd_cliques
+        numeric qtd_custo_brl
+    }
+
+    FCT_AB_TEST_RESULTS {
+        text variant_id PK
+        numeric sessoes
+        numeric conversoes
+        numeric receita_brl
+        numeric custo_brl
+        numeric taxa_conversao
+        numeric cpa_brl
+        numeric roas
+        numeric ticket_medio_brl
+        numeric z_stat
+        numeric p_valor
+    }
+```
+
 ---
 
 ### 3.1 Tabela Dimensão: `dim_variant`

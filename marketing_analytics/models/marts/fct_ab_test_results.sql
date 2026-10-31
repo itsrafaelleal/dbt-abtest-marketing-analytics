@@ -1,24 +1,16 @@
 -- fct_ab_test_results — fato agregado do experimento A/B 
 
---   1. funil_por_variante  -> sessões, conversões e receita vindas do fct_funil
---   2. gasto_por_variante  -> custo de mídia vindo do fct_ad_gasto_diario,
---                             ligado à variante via dim_variant (campaign_id)
---   3. base                -> junta os dois lados + KPIs derivados (CR, CPA, ROAS, AOV)
---   4. z_test              -> estatística Z de proporções (A vs B) e p-valor
---
 
 with funil_por_variante as (
-
-    -- Soma o funil inteiro por variante. Filtra variant_id not null:
+    -- Lê de fct_performance_diaria (onde sessoes já é aditivo, sem a dimensão de etapa):
     select
         variant_id,
         sum(sessoes)      as sessoes,
         sum(qtd_compras)  as conversoes,
         sum(receita_brl)  as receita_brl
-    from {{ ref('fct_funil') }}
+    from {{ ref('fct_performance_diaria') }}
     where variant_id is not null
     group by variant_id
-
 ),
 
 gasto_por_variante as (
