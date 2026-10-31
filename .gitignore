@@ -12,11 +12,12 @@ __pycache__/
 .env.*
 !.env.example
 
-# Dados (não suba datasets pesados nem brutos pro Git)
-data/
+# Dados
 *.csv
 *.parquet
+# Dados de exemplo
 
+!*.parquet.example
 # dbt — artefatos de execução (gerados, não versionar)
 # target/        -> SQL compilado e resultados da ultima rodada
 # dbt_packages/  -> dependencias baixadas (reinstalaveis com `dbt deps`)
