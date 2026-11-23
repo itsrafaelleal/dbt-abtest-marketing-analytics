@@ -55,6 +55,9 @@ tratada na camada certa.
 ## Arquitetura Medalhão
 
 Fluxo completo nas camadas **Landing → Raw → Staging → Marts → Dashboard**:
+## Arquitetura Medalhão
+
+![Arquitetura do Marítimo Data Pipeline](asset/fluxo_proj_abteste.png)
 
 ```text
 Fontes de Marketing Digital
